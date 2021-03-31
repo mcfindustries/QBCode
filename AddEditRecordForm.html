@@ -1,0 +1,366 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+    <script src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js'> </script>
+    <style>
+        .loader {
+            border: 16px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 16px solid #3498db;
+            width: 120px;
+            height: 120px;
+            -webkit-animation: spin 2s linear infinite; /* Safari */
+            animation: spin 2s linear infinite;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Safari */
+        @-webkit-keyframes spin {
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <script>
+        function buildForm() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const dbid = urlParams.get('dbid');
+            let rid = urlParams.get('rid');
+            const NEfids = urlParams.get('NEfids');
+            const fids = urlParams.get('fids');
+            const appToken = urlParams.get('apptoken');
+            const embed = urlParams.get('embed');
+            const realm = window.location.hostname.substring(0, window.location.hostname.indexOf("."));
+            const headers = new Map;
+
+            // Alert to missing parameters and go back to previous page
+            if (!dbid || !fids) {
+                alert(`Missing either the DBID or FIDs parameter.\nYou'll now be redirected.`);
+                errRdr();
+            }
+            if(!embed){
+                $('#description').show();
+            }
+
+            if (!rid) {
+                rid = 0;
+                document.getElementById("test").textContent = 'Add Record';
+                $('#instructions').show();
+            } else {
+                document.getElementById("test").textContent = `Edit Record # ${rid}`;
+            }
+
+            // Temporary Auth doesn't work with EOTI since the user isn't logged into the realm. For this reason the getTempAuth() call is commented out.
+            // For production use cases, delete the EOTI Auth section and uncomment the Temp Auth section immediately below that
+            // Begin EOTI Auth
+           // headers.set(dbid, {
+           //     'QB-Realm-Hostname': realm,
+           //     'userAgent': 'QB APIGateway',
+           //     'Authorization': `QB-TEMP-TOKEN ` // EOTI access doesn't require a token
+           // });
+           // query();
+            // End EOTI Auth
+
+            // Begin Temp Auth
+             getTempAuth(realm, dbid, appToken).then((header) => {
+                 headers.set(dbid, header);
+                 query();
+             });
+            // End Temp Auth
+
+            function query() {
+                const fields = fids.split('.');
+                const params = {
+                    "from": dbid,
+                    "where": `{3.EX.${rid}}`,
+                    "select": fields
+                };
+                $.ajax({
+                    url: `https://api.quickbase.com/v1/records/query`,
+                    method: 'POST',
+                    headers: headers.get(dbid),
+                    dataType: "json",
+                    contentType: "application/json; charset=utf-8",
+                    data: JSON.stringify(params),
+                    success: function (response) {
+                        // console.log(response);
+
+                        // Generate Form Dynamically
+                        $(document).ready(function () {
+                            let wrapper = $("#inputForm");
+                            for (let i = 0; i < response.fields.length; i++) {
+                                const fid = response.fields[i].id;
+                                const fLabel = response.fields[i].label;
+                                const fType = response.fields[i].type;
+
+                                let type, val, value = "";
+                                if (response.data[0]) {
+                                    if (fType === "timestamp") {
+                                        value = `value="${response.data[0][fid].value.slice(0, -1)}"`; // Removes the Z from the end of the returned timestamp
+                                    } else if (fType === "checkbox" && response.data[0][fid].value === true) {
+                                        value = `value="${response.data[0][fid].value}" checked`; // Marks checkbox as true if necessary
+                                    } else if (fType === "user" && response.data[0][fid].value === true) {
+                                        value = `value="${response.data[0][fid].value.email}"`; // Returns the users email address
+                                    } else {
+                                        value = `value="${response.data[0][fid].value}"`;
+                                        val = response.data[0][fid].value;
+                                    }
+                                }
+
+                                // Determine the type of input field
+                                switch (fType) {
+                                    case "date":
+                                        type = "date"
+                                        break;
+                                    case "timestamp":
+                                        type = "datetime-local"
+                                        break;
+                                    case "timeofday":
+                                        type = "time"
+                                        break;
+                                    case "checkbox":
+                                        type = "checkbox"
+                                        break;
+                                    case "phone":
+                                        type = "tel"
+                                        break;
+                                    case "numeric":
+                                        type = "number"
+                                        break;
+                                    case "text-multi-line":
+                                        type = "textarea"
+                                        break;
+                                    case "rich-text":
+                                        type = "textarea"
+                                        break;
+                                    case "text-multiple-choice":
+                                        type = "select"
+                                        break;
+                                    default:
+                                        type = "text"
+
+                                }
+
+                                // This sets the styling of input fields which are dynamically generated
+                                let input;
+                                if(type === "textarea"){
+                                    input = `<label for="${fid}">${fLabel}</label><textarea class="form-control" id="${fid}" ${value}/><br>`;
+                                }else if(type === "select"){
+                                    input = `<label for="${fid}">${fLabel}</label><select class="form-control" id="${fid}"><option></option></select><br>`;
+                                }else {
+                                    input = `<label for="${fid}">${fLabel}</label><input type="${type}" class="form-control" id="${fid}" ${value}/><br>`;
+                                }
+                                $(wrapper).append(input);
+                                if(type === "select"){
+                                    getChoices(dbid, fid, val, headers.get(dbid))
+                                }
+                            }
+                        });
+                    }
+                })
+            }
+        }
+        // getChoices will only work for users with admin access - This is due to the fact that admin perms are needed to run the necessary Get Field API call
+        function getChoices(dbid, fid, value, header){
+            return new Promise((resolve) =>{
+                $.ajax({
+                    url: `https://api.quickbase.com/v1/fields/${fid}?tableId=${dbid}`,
+                    method: 'GET',
+                    headers: header,
+                    dataType: "json",
+                    contentType: "application/json; charset=utf-8",
+                    success: function (response) {
+                        const select = $(`#${fid}`);
+                        response.properties.choices.forEach(choice => {
+                            let selected;
+                            if(choice === value){
+                                selected = "selected";
+                            }
+
+                            const option = `<option value="${choice}" ${selected}>${choice}</option>`
+                            $(select).append(option);
+                            resolve();
+                        })
+                    },
+                    error: function (error) {
+                        alert(`An error occurred.\nAdmin permissions are needed to get the fields choices\n Click OK to be redirected back to the previous page.`);
+                        errRdr();
+                    }
+                });
+            })
+        }
+        function run(){
+
+            $('#form').hide();
+            $('#status').show();
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const dbid = urlParams.get('dbid');
+            let rid = urlParams.get('rid');
+            const fids = urlParams.get('fids');
+            const appToken = urlParams.get('apptoken');
+            const realm = window.location.hostname.substring(0,window.location.hostname.indexOf("."));
+            const fields = fids.split('.');
+            const headers = new Map;
+
+            // Temporary Auth doesn't work with EOTI since the user isn't logged into the realm. For this reason the getTempAuth() call is commented out.
+            // For production use cases, delete the EOTI Auth section and uncomment the Temp Auth section immediately below that
+            // Begin EOTI Auth
+            //headers.set(dbid, {
+            //    'QB-Realm-Hostname': realm,
+            //    'userAgent': 'QB APIGateway',
+            //    'Authorization': `QB-TEMP-TOKEN ` // EOTI access doesn't require a token
+            //});
+            //save();
+            // End EOTI Auth
+
+            // Begin Temp Auth
+             getTempAuth(realm, dbid, appToken).then((header) => {
+                 headers.set(dbid, header);
+                 save();
+             });
+            // End Temp Auth
+
+            function save(){
+                // Create the upsert payload based on the values within the input elements
+                const payload = {
+                    "to": dbid,
+                    "mergeFieldId": 3,
+                    "data": [
+                        {}
+                    ]
+                };
+                if(rid){
+                    payload.data[0][3] = {"value": rid};
+                }
+
+                for(i=0; i<fields.length; i++){
+                    const input = $(`#${fields[i]}`);
+                    const type = input.attr('type');
+                    let val;
+                    let add = true;
+
+                    if(type==="checkbox"){
+                        val = input.prop('checked');
+                    }else if(type==="number"){
+                        if(input.val()) {
+                            val = Number(input.val());
+                        }else{
+                            add = false;
+                        }
+                    }else if(type==="datetime-local" && input.val() && input.val().length === 16) {
+                        val = `${input.val()}:00`
+                    }else if(type==="time" && input.val() && input.val().length === 5) {
+                        val = `${input.val()}:00`
+                    }else{
+                        val = input.val();
+                    }
+
+                    if(add) {
+                        payload.data[0][fields[i]] = {"value": val};
+                    }
+                }
+                jsonImport(payload, "Add Record");
+            }
+
+            function jsonImport(payload, udata) {
+                return new Promise((resolve) =>{
+                    if(payload.data.length > 0) {
+
+                        $.ajax({
+                            url: 'https://api.quickbase.com/v1/records',
+                            method: 'POST',
+                            headers: headers.get(payload.to),
+                            dataType: "json",
+                            contentType: "application/json; charset=utf-8",
+                            data: JSON.stringify(payload),
+                            retryLimit: 10,
+                            success: function (response) {
+                                if(!rid){
+                                    rid = response.metadata.createdRecordIds[0];
+                                }
+                                window.location.href = `https://${realm}.quickbase.com/db/${dbid}?a=dr&rid=${rid}`;
+                            },
+                            error: function (error) {
+                                alert(`An error occurred. Click OK to be redirected back to the previous page.`);
+                                errRdr();
+                            }
+                        });
+                    }
+                });
+            }
+
+        }
+        function getTempAuth(realm, dbid, appToken) {
+            return new Promise(function(resolve) {
+                $.ajax({
+                    url: `https://api.quickbase.com/v1/auth/temporary/${dbid}`,
+                    method: 'GET',
+                    headers: {
+                        'QB-Realm-Hostname': realm,
+                        'userAgent': 'QB APIGateway',
+                        'QB-App-Token': appToken
+                    },
+                    xhrFields: {
+                        withCredentials: true
+                    },
+                    success: function (data) {
+                        resolve({
+                            'QB-Realm-Hostname': realm,
+                            'userAgent': 'QB APIGateway',
+                            'Authorization': `QB-TEMP-TOKEN ${data.temporaryAuthorization}`
+                        });
+                    }
+                });
+            })
+        }
+        function errRdr(){
+            // Redirects to the previous page, if this page was the previous page as well, then redirect to the app home page
+            if(document.referrer && document.referrer !== window.location.href) {
+                window.location.href = document.referrer;
+            }else{
+                window.location.href = window.location.origin + window.location.pathname;
+            }
+        }
+    </script>
+    <title>Add, Edit, View Record</title>
+</head>
+<body onload="buildForm()">
+    <div class="container" id="form">
+        <h2 id="test"></h2>
+        <h4 id="description" hidden>This form is dynamically generated based on the FIDs (Field IDs) passed in the URL. It also is able to handle both adds and edits by detecting if a RID (Record ID#, FID 3) is passed in the URL.  If no RID is provided, a new record will be created.</h4>
+        <h5 style="color:red">This is not the demo.  Figure out the message control soon.</h5>
+        <form>
+            <div class="form-group">
+                <div id="inputForm"></div>
+                <a class="btn btn-primary" onclick="run()" role="button">Submit</a>
+                <a class="btn" onclick="window.location.href = document.referrer;" role="button">Cancel</a>
+                <h4 id="instructions" hidden>Once submitted you'll be directed to the <b>view form</b> of the newly created record.
+                    <br>Within the record there's buttons which will allow you to edit the record in this same format.</h4>
+            </div>
+        </form>
+    </div>
+    <br>
+    <div class="container" id="status" style="text-align:center" hidden>
+        <h2>Processing...</h2>
+        <div class="loader" id="loader"></div></div>
+    </div>
+
+</body>
+</html>
+
+<!--
+These code samples are provided "AS IS" without any warranties of any kind and is not supported by Quick Base teams.
+You are responsible for the security and maintenance of any third-party code inside of your application.
+Any reliance on Quick Base functions, HTML, CSS or other document-object-model (DOM) elements should be considered unstable and may change at any time, without notice.
+
+Builders should not reference or rely on common libraries hosted by Quickbase (such as jQuery or Angular) as these may change at any time.
+Customers should reference their own hosted libraries or from 3rd-party resources that they can trust and maintain
+-->

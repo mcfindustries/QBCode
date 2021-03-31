@@ -1,0 +1,38 @@
+// Source Control
+// [Alias]=[_DBID_PARENTS]
+// [DBID]="XXXXX"
+// FID=X   
+//  Rich Text Field that executes the Code Page  AddEditRecordForm.html
+
+// Images
+var text IMGClock  =     "<img src=https://images.quickbase.com/si/32/031-folder_add.png>"; 
+
+
+// Business Logic Variables
+var text Token = "XXXXXXXXXXXXXXXX";        // Insert App Token Value
+var number DateTimeField =X;                // Replace "X" with the FID of the Date Time Field being edited
+var number TextField = X;                   // Replace "X" with the FID of the Text field being populated
+var text  AliasTableID = [_DBID_PARENTS];   // Edit the Alias with the correct value from the Advanced Section of the Table
+var text MSGUI = "Click to run ";           // Message in the Quickbase UI for the User
+
+
+// URL for Business Logic
+var text URLOne = URLRoot() & "db/" & $AliasTableID & "?a=API_EditRecord&apptoken=" &$Token & "&rid=" & [Record ID#] & "&_fid_" &$DateTimeField & "=" & Now();
+var text URLTwo = URLRoot() & "db/" & $AliasTableID & "?a=API_EditRecord&apptoken=" &$Token & "&rid=" & [Record ID#] & "&_fid_" &$TextField & "=" & ToText([Date Modified]);
+var text toUrl = $URLOne & "&rdr=" & URLEncode($URLTwo);
+
+
+// Code Page URL Variables
+var number CodePageID =X;                   // Replace "X" with page number where AddEditRecordForm.html has been placed in the Quickbase application 
+var text message = "Please wait Running the Business Logi URL's...";   // Message on the page that will open while the Business Logic Runs
+
+var text delay = "1.25";  // Number of seconds to delay before the Reload Occurs
+var text Refresh = "No";  // set to No or it will default to Refresh
+
+// Code Page URL
+var text redirect = If($Refresh="No", "none", "");
+var text URLCodePage = URLRoot() & "db/" &AppID() & "?a=dbpage&pageid=" & $CodePageID & "&to=" & URLEncode($toUrl) & "&message=" & URLEncode($message) & "&delay=" & $delay & "&redirect=" & URLEncode($redirect);
+ 
+
+ // UI Logic and Permissions
+ "<a rel='opener'  target='_blank' href=" & $URLCodePage & ">" & $IMGClock & "<br>" & $MSGUI &  "</a>"
